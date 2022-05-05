@@ -17,7 +17,7 @@ import type { WRTC, WebRTCInitiatorInit, WebRTCReceiver, WebRTCReceiverInit } fr
 import type { Connection } from '@libp2p/interfaces/connection'
 import type { Transport, MultiaddrConnection, Listener, DialOptions, CreateListenerOptions } from '@libp2p/interfaces/transport'
 import type { PeerDiscovery, PeerDiscoveryEvents } from '@libp2p/interfaces/peer-discovery'
-import type { WebRTCStarSocket, HandshakeSignal } from '@libp2p/webrtc-star-protocol'
+import type { WebRTCMulttiSocket, HandshakeSignal } from '@libp2p/webrtc-star-protocol'
 import { Components, Initializable } from '@libp2p/interfaces/components'
 
 const webrtcSupport = 'RTCPeerConnection' in globalThis
@@ -71,7 +71,7 @@ export interface SignalServerServerEvents {
 
 export interface SignalServer extends EventEmitter<SignalServerServerEvents> {
   signallingAddr: Multiaddr
-  socket: WebRTCStarSocket
+  socket: WebRTCMulttiSocket
   connections: MultiaddrConnection[]
   channels: Map<string, WebRTCReceiver>
   pendingSignals: Map<string, HandshakeSignal[]>
@@ -139,9 +139,9 @@ export class WebRTCStar implements Transport, Initializable {
     const intentId = uint8ArrayToString(randomBytes(36), 'hex')
 
     return await new Promise<WebRTCInitiator>((resolve, reject) => {
-      const sio = this.sigServers.get(cleanUrlSIO(ma))
+      const sigServer = this.sigServers.get(cleanUrlSIO(ma))
 
-      if (sio?.socket == null) {
+      if (sigServer?.socket == null) {
         return reject(errcode(new Error('unknown signal server to use'), 'ERR_UNKNOWN_SIGNAL_SERVER'))
       }
 
@@ -196,15 +196,15 @@ export class WebRTCStar implements Transport, Initializable {
       channel.addEventListener('signal', (evt) => {
         const signal = evt.detail
 
-        sio.socket.emit('ss-handshake', {
+        sigServer.socket.emit('ss-handshake', {
           intentId: intentId,
-          srcMultiaddr: sio.signallingAddr.toString(),
+          srcMultiaddr: sigServer.signallingAddr.toString(),
           dstMultiaddr: ma.toString(),
           signal: signal
         })
       })
 
-      sio.socket.on('ws-handshake', (offer) => {
+      sigServer.socket.on('ws-handshake', (offer: HandshakeSignal) => {
         if (offer.intentId === intentId && offer.err != null) {
           channel.close().finally(() => {
             reject(errcode(new Error(offer.err), 'ERR_SIGNALLING_FAILED'))

@@ -128,8 +128,7 @@
     "release": "aegir release"
   },
   "dependencies": {
-    "@multiformats/multiaddr": "^10.1.7",
-    "socket.io-client": "^4.1.2"
+    "@multiformats/multiaddr": "^10.1.7"
   },
   "devDependencies": {
     "aegir": "^37.0.7"

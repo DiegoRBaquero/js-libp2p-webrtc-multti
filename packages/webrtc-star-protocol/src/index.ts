@@ -1,5 +1,3 @@
-import type { Socket } from 'socket.io-client'
-
 export interface OfferSignal {
   type: 'offer'
   sdp: string
@@ -38,10 +36,8 @@ export interface HandshakeSignal {
   err?: string
 }
 
-interface SocketEvents {
+export interface SocketEvents {
   'ss-handshake': (offer: HandshakeSignal) => void
-  'ss-join': (maStr: string) => void
-  'ss-leave': (maStr: string) => void
   'ws-peer': (maStr: string) => void
   'ws-handshake': (offer: HandshakeSignal) => void
   'error': (err: Error) => void
@@ -49,6 +45,7 @@ interface SocketEvents {
   'close': () => void
 }
 
-export interface WebRTCStarSocket extends Socket<SocketEvents> {
-
+export interface WebRTCMulttiSocket extends EventSource {
+  emit: (event: string, message: string | any) => void
+  on: (event: string, fn: (data: any) => void) => void
 }

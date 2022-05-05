@@ -1,6 +1,5 @@
 import { logger } from '@libp2p/logger'
 import errCode from 'err-code'
-import { connect } from 'socket.io-client'
 import pDefer from 'p-defer'
 import { WebRTCReceiver } from '@libp2p/webrtc-peer'
 import { toMultiaddrConnection } from './socket-to-conn.js'
@@ -11,20 +10,14 @@ import type { Multiaddr } from '@multiformats/multiaddr'
 import type { Upgrader, ConnectionHandler, Listener, MultiaddrConnection, ListenerEvents } from '@libp2p/interfaces/transport'
 import type { WebRTCStar, WebRTCStarListenerOptions, SignalServer, SignalServerServerEvents } from './index.js'
 import type { WebRTCReceiverInit } from '@libp2p/webrtc-peer'
-import type { WebRTCStarSocket, HandshakeSignal } from '@libp2p/webrtc-star-protocol'
+import type { WebRTCMulttiSocket, HandshakeSignal } from '@libp2p/webrtc-star-protocol'
 import { EventEmitter, CustomEvent } from '@libp2p/interfaces'
 
 const log = logger('libp2p:webrtc-star:listener')
 
-const sioOptions = {
-  transports: ['websocket'],
-  'force new connection': true,
-  path: '/socket.io-next/' // This should be removed when socket.io@2 support is removed
-}
-
 class SigServer extends EventEmitter<SignalServerServerEvents> implements SignalServer {
   public signallingAddr: Multiaddr
-  public socket: WebRTCStarSocket
+  public socket: WebRTCMulttiSocket
   public connections: MultiaddrConnection[]
   public channels: Map<string, WebRTCReceiver>
   public pendingSignals: Map<string, HandshakeSignal[]>
@@ -37,7 +30,7 @@ class SigServer extends EventEmitter<SignalServerServerEvents> implements Signal
     super()
 
     this.signallingAddr = signallingAddr
-    this.socket = connect(signallingUrl, sioOptions)
+    this.socket = createTransport(signallingAddr)
     this.connections = []
     this.channels = new Map()
     this.pendingSignals = new Map()
@@ -46,29 +39,8 @@ class SigServer extends EventEmitter<SignalServerServerEvents> implements Signal
     this.handler = handler
     this.channelOptions = channelOptions
 
-    this.handleWsHandshake = this.handleWsHandshake.bind(this)
-
-    this.socket.once('connect_error', (err) => {
-      this.dispatchEvent(new CustomEvent('error', {
-        detail: err
-      }))
-    })
-    this.socket.once('error', (err: Error) => {
-      this.dispatchEvent(new CustomEvent('error', {
-        detail: err
-      }))
-    })
-
-    this.socket.on('ws-handshake', this.handleWsHandshake)
-    this.socket.on('ws-peer', (maStr) => {
-      this.dispatchEvent(new CustomEvent('peer', {
-        detail: maStr
-      }))
-    })
-    this.socket.on('connect', () => this.socket.emit('ss-join', signallingAddr.toString()))
-    this.socket.once('connect', () => {
-      this.dispatchEvent(new CustomEvent('listening'))
-    })
+    this.handleEsHandshake = this.handleEsHandshake.bind(this)
+    this.socket.on('ws-handshake', this.handleEsHandshake)
   }
 
   _createChannel (intentId: string, srcMultiaddr: string, dstMultiaddr: string) {
@@ -148,7 +120,7 @@ class SigServer extends EventEmitter<SignalServerServerEvents> implements Signal
     return channel
   }
 
-  handleWsHandshake (offer: HandshakeSignal) {
+  handleEsHandshake (offer: HandshakeSignal) {
     log('incoming handshake. signal type "%s" is answer %s', offer.signal.type, offer.answer)
 
     if (offer.answer === true || offer.err != null || offer.intentId == null) {
@@ -191,8 +163,6 @@ class SigServer extends EventEmitter<SignalServerServerEvents> implements Signal
 
   async close () {
     // Close listener
-    this.socket.emit('ss-leave', this.signallingAddr.toString())
-    this.socket.removeAllListeners()
     this.socket.close()
 
     await Promise.all([
@@ -309,6 +279,43 @@ class WebRTCListener extends EventEmitter<ListenerEvents> implements Listener {
 
     return []
   }
+}
+
+function createTransport(userId: Multiaddr): WebRTCMulttiSocket {
+  const eventSource = new EventSource(`https://localhost:8383/events?uid=${userId}`)
+  eventSource.onopen = () => {
+    console.log('ES Open')
+  }
+  eventSource.onerror = (err) => {
+    console.log('ES', 'Restarting ES because ' + err)
+    eventSource.onmessage = null
+    eventSource.onerror = null
+    eventSource.onopen = null
+    eventSource.close()
+  }
+  eventSource.onmessage = (ev) => {
+    const data = JSON.parse(ev.data)
+    console.log('ES message', data)
+  }
+  // eventSource.addEventListener('ping', console.log)
+  eventSource.addEventListener('answer', ((ev: MessageEvent) => {
+    const data = JSON.parse(ev.data)
+    console.log('ES answer', 'Received answer', data)
+  }) as EventListener)
+
+  // @ts-ignore
+  eventSource.emit = (event: string, message: Object) => {
+    return fetch(`https://localhost:8383/message?uid=${userId}`, { method: 'POST', body: JSON.stringify({ event, message, userId }) })
+  }
+
+  // @ts-ignore
+  eventSource.on = (event, fn) => eventSource.addEventListener(event, ((ev: MessageEvent) => {
+    const data = JSON.parse(ev.data)
+    console.log('ES answer', 'Received answer', data)
+    fn(data)
+  }) as EventListener)
+
+  return eventSource as WebRTCMulttiSocket
 }
 
 export function createListener (upgrader: Upgrader, handler: ConnectionHandler, peerId: PeerId, transport: WebRTCStar, options: WebRTCStarListenerOptions) {
